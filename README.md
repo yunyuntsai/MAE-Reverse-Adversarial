@@ -1,5 +1,6 @@
 # MAE-Reverse-Adversarial
 
+Run reconstruction
 ```
 OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=3 run_reconstruct_mae.py  //
 --data_path /local/rcs/yunyun/ImageNet-Data/Attack/bim_8  //
