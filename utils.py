@@ -594,3 +594,13 @@ def visualize_tsne(feature, group_ylabel):
         alpha=0.3
     )
     plt.savefig('./output/mae_tsne.png')
+
+def gaussian_noise(x):
+    # c = [.08, .12, 0.18, 0.26, 0.38][severity - 1]
+    std_range = [.05, 0.5]  
+    eps_bound = [4/255, 8/255, 16/255]
+    eps = eps_bound[np.random.randint(0,3,1)[0]]
+    c = (std_range[1] - std_range[0]) * np.random.uniform(0,1) + std_range[0]
+    # print('std: {} eps: {}'.format(c, eps))
+    noise = torch.sign(torch.empty((x.shape)).normal_(mean=0, std=c))*eps
+    return x + torch.clamp(noise.cuda(), 0, 1)

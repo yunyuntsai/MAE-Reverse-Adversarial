@@ -20,9 +20,9 @@ import torch.utils.data as data
 
 from timm.models import create_model
 from optim_factory import create_optimizer
-import torch.nn as nn
+import torch.nn as nn 
 from datasets import build_pretraining_dataset, gen_txt, ConcatTrainDataset
-from engine_for_pretraining import train_one_epoch, multi_train_one_epoch, evaluate, multi_evaluate, anamoly_detection
+from engine_for_pretraining import multi_train_one_epoch, multi_evaluate, anamoly_detection
 from utils import NativeScalerWithGradNormCount as NativeScaler
 import utils
 from collections import OrderedDict
