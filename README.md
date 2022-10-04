@@ -1,5 +1,12 @@
 # MAE-Reverse-Adversarial
 
+Training the MAE and classifier
+```
+ OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=3 run_reconstruct_contrast.py //
+ --data_path /local/rcs/yunyun/ImageNet-Data/val --mask_ratio 0.75 --model pretrain_mae_base_patch16_224 //
+ --batch_size 16 --output_dir output/reconstruct_contrast_pretrain_model/ --finetune /local/rcs/yunyun/MAE-pytorch/output/pretrain_vit_base_p16_224.pth //
+ --epoch 400
+```
 Run reconstruction
 ```
 OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=3 run_reconstruct_mae.py  //
