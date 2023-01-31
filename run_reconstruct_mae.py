@@ -97,8 +97,15 @@ def get_args():
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/train', type=str,
+    parser.add_argument('--two_data_paths', default=False, type=bool, help='data_path') ## NEW 
+    parser.add_argument('--data_path1', default='/datasets01/imagenet_full_size/061417/train', type=str,
                         help='dataset path')
+    parser.add_argument('--data_path2', default='/datasets01/imagenet_full_size/061417/train', type=str,
+                        help='dataset path')
+
+    # parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/train', type=str,
+    #                     help='dataset path')
+    
     parser.add_argument('--src_data_path', default='/datasets01/imagenet_full_size/061417/train', type=str,
                         help='dataset path')
     parser.add_argument('--tar_data_path', default='/datasets01/imagenet_full_size/061417/train', type=str,
@@ -121,7 +128,8 @@ def get_args():
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=10, type=int)
+    # parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem',
@@ -257,11 +265,27 @@ def main(args):
 
     # get dataset
     if args.eval:
-        dataset_src = build_pretraining_dataset(args.data_path, args)
-        # dataset_tar = build_pretraining_dataset(args.tar_data_path, args)
+        if args.two_data_paths == False:
+            dataset_src = build_pretraining_dataset(args.data_path1, args)
+        else: 
+            data_list = [build_pretraining_dataset(args.data_path1, args), build_pretraining_dataset(args.data_path2, args)]
+            dataset_src = data.ConcatDataset(data_list)
+        
+        # # TODO: dataset_src = data.ConcatDataset(train_data_list)
+        # train_data_list = list()
+        # # txt_train_list = os.path.join(args.output_dir, 'train_list.txt')
+        # advdata_dir = args.data_path
+        # img_train_clean =  advdata_dir + '/clean/train'
+        # img_train_adv =  advdata_dir  + '/unknown_adv/04/train'
+        # # gen_txt(txt_train_list, img_train_clean, img_train_adv)
+        # train_data_list.append(ConcatTrainDataset(txt_train_list, args))
+        # # multiple_dataset = data.ConcatDataset(train_data_list)
+
+
     else: 
         # dataset_trainclean = build_pretraining_dataset(os.path.join(args.data_path, 'clean'), args)
         dataset_train = build_pretraining_dataset(args.data_path, args)
+
         # print('len of labels: {}'.format(np.unique((dataset_train.targets))))
 
         # train_data_list = list()
@@ -285,7 +309,8 @@ def main(args):
             num_training_steps_per_epoch = len(dataset_src) // args.batch_size // num_tasks
 
             sampler_src = torch.utils.data.DistributedSampler(
-                dataset_src, num_replicas=num_tasks, rank=sampler_rank, shuffle=True
+                # dataset_src, num_replicas=num_tasks, rank=sampler_rank, shuffle=True
+                dataset_src, num_replicas=num_tasks, rank=sampler_rank, shuffle=False
             )
             print("Sampler_src = %s" % str(sampler_src))
 
@@ -407,7 +432,7 @@ def main(args):
     if args.eval:
         test_stats = multi_evaluate(model, mlp_head, data_loader_src, device,  normlize_target=args.normlize_target, log_writer=log_writer,  patch_size=patch_size[0])
         # anamoly_detection(args, model, data_loader_src, device,  normlize_target=args.normlize_target, log_writer=log_writer,  patch_size=patch_size[0])
-        print(f"Accuracy of the network on the {len(data_loader_src)} test images: {test_stats['loss']:.2f}%  {test_stats['acc1']:.2f}%  {test_stats['acc5']:.2f}%")
+        print(f"Accuracy of the network on the {len(data_loader_src)} test images: MSE loss {test_stats['loss']:.2f}, acc1 {test_stats['acc1']:.2f}%, acc5 {test_stats['acc5']:.2f}%")
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
@@ -457,7 +482,7 @@ def main(args):
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+    f('Training time {}'.format(total_time_str))
 
 
 if __name__ == '__main__':

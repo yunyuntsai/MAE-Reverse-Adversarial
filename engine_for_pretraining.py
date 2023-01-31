@@ -43,7 +43,7 @@ def config_mlp(mlp_head):
     # disable grad, to (re-)enable only what tent updates
     return mlp_head
 
-def  multi_train_one_epoch(model: torch.nn.Module, mlp_head: torch.nn.Module, data_loader: Iterable, optimizer: torch.optim.Optimizer,
+def multi_train_one_epoch(model: torch.nn.Module, mlp_head: torch.nn.Module, data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     mlp_optimizer: torch.optim.Optimizer, device: torch.device, epoch: int, loss_scaler, max_norm: float = 0, patch_size: int = 16, 
                     normlize_target: bool = True, log_writer=None, lr_scheduler=None, start_steps=None,
                     lr_schedule_values=None, wd_schedule_values=None):
@@ -55,7 +55,7 @@ def  multi_train_one_epoch(model: torch.nn.Module, mlp_head: torch.nn.Module, da
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 10
+    print_freq = 1
 
     loss_func = nn.MSELoss()
     mlp_loss_func = nn.CrossEntropyLoss()
@@ -246,7 +246,7 @@ def multi_evaluate(model: torch.nn.Module, mlp_head: torch.nn.Module, data_loade
     # metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     # metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(1)
-    print_freq = 10
+    print_freq = 1
     epsilon = (8 / 255.)
     pgd_alpha = (2 / 255.)
     attack_iters = 5
@@ -261,7 +261,9 @@ def multi_evaluate(model: torch.nn.Module, mlp_head: torch.nn.Module, data_loade
             activation[name] = output.detach()
         return hook
 
-    hook = model.module.encoder.head2.register_forward_hook(get_activation('encoder_head'))
+    # hook = model.module.encoder.head2.register_forward_hook(get_activation('encoder_head'))
+    hook = model.encoder.head2.register_forward_hook(get_activation('encoder_head'))
+
     index = 0
     for step, (batch, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
@@ -292,8 +294,11 @@ def multi_evaluate(model: torch.nn.Module, mlp_head: torch.nn.Module, data_loade
 
         with torch.cuda.amp.autocast():
             # delta = compute_reverse_attack(model, loss_func, images, labels, bool_masked_pos, epsilon, pgd_alpha, attack_iters, norm)
-            noise_images = utils.gaussian_noise(images)
-            rev_outputs = model(noise_images, bool_masked_pos)
+            
+            # noise_images = utils.gaussian_noise(images)
+            # rev_outputs = model(noise_images, bool_masked_pos)
+            
+            rev_outputs = model(images, bool_masked_pos) # new line
             loss = loss_func(input=rev_outputs, target=labels)
             encoder_fts2 = activation['encoder_head']
             rev_mlp_outputs = mlp_head(encoder_fts2)
@@ -394,7 +399,7 @@ def anamoly_detection(args, model: torch.nn.Module, src_data_loader: Iterable,
 def inference_model(model: torch.nn.Module, data_loader: Iterable,
                     device: torch.device, normlize_target: bool = True, metric_logger=None, patch_size: int = 16):
     
-    print_freq = 10
+    print_freq = 1
     header = 'Epoch: [{}]'.format(1)
     loss_list = []
     loss_func = nn.MSELoss()
