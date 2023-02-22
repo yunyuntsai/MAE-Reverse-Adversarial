@@ -30,6 +30,27 @@ from modeling_pretrain import Mlp
 import modeling_pretrain
 import random
 import csv
+from run_simba import run_simba_main, get_simba_args
+
+
+class Batches:
+    def __init__(self, dataset, batch_size, shuffle, device, set_random_choices=False, num_workers=0, drop_last=False):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.set_random_choices = set_random_choices
+        self.data_loader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=True, shuffle=shuffle,
+            drop_last=drop_last
+        )
+        self.device = device
+
+    def __iter__(self):
+        if self.set_random_choices:
+            self.dataset.set_random_choices()
+        return ({'input': x1.float(), 'mask': x2.bool(), 'target': y.long()} for (x1, x2, y) in self.data_loader)
+
+    def __len__(self):
+        return len(self.data_loader)
 
 def get_args():
     parser = argparse.ArgumentParser('MAE pre-training script', add_help=False)
@@ -107,6 +128,8 @@ def get_args():
 
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
+    parser.add_argument('--output_fn', default='',
+                        help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default=None,
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
@@ -134,7 +157,8 @@ def get_args():
     parser.add_argument('--local_rank', default=-1, type=int)
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
-
+    
+    get_simba_args(parser)
     return parser.parse_args()
 
 
@@ -167,6 +191,7 @@ def get_Mlp(args):
     )
 
     return mlp_head
+
 
 
 def main(args):
@@ -257,25 +282,14 @@ def main(args):
 
     # get dataset
     if args.eval:
+        dataset_orig = build_pretraining_dataset('/local/rcs/yunyun/ImageNet-Data/val/', args)
         dataset_src = build_pretraining_dataset(args.data_path, args)
+        print('test data size: ', len(dataset_src))
         # dataset_tar = build_pretraining_dataset(args.tar_data_path, args)
     else: 
         # dataset_trainclean = build_pretraining_dataset(os.path.join(args.data_path, 'clean'), args)
         dataset_train = build_pretraining_dataset(args.data_path, args)
         # print('len of labels: {}'.format(np.unique((dataset_train.targets))))
-
-        # train_data_list = list()
-        # txt_train_list = os.path.join(args.output_dir, 'train_list.txt')
-        # advdata_dir = args.data_path
-        # img_train_clean =  advdata_dir + '/clean/train'
-        # img_train_adv =  advdata_dir  + '/unknown_adv/04/train'
-        # gen_txt(txt_train_list, img_train_clean, img_train_adv)
-        # train_data_list.append(ConcatTrainDataset(txt_train_list, args))
-
-        # multiple_dataset = data.ConcatDataset(train_data_list)
-        # example_num = len(multiple_dataset)
-        # idx_input = random.sample(range(0,example_num),int(example_num)) #100% data_portion
-        # sub_dataset = data.Subset(multiple_dataset, idx_input)
 
     if True:  # args.distributed:
         num_tasks = utils.get_world_size()
@@ -285,7 +299,7 @@ def main(args):
             num_training_steps_per_epoch = len(dataset_src) // args.batch_size // num_tasks
 
             sampler_src = torch.utils.data.DistributedSampler(
-                dataset_src, num_replicas=num_tasks, rank=sampler_rank, shuffle=True
+                dataset_src, num_replicas=num_tasks, rank=sampler_rank, shuffle=False
             )
             print("Sampler_src = %s" % str(sampler_src))
 
@@ -303,6 +317,7 @@ def main(args):
     else:
         if args.eval:
             sampler_src = torch.utils.data.RandomSampler(dataset_src)
+            print("Sampler_src = %s" % str(sampler_src))
             # sampler_tar = torch.utils.data.RandomSampler(dataset_tar)
         else:
             sampler_train = torch.utils.data.RandomSampler(dataset_train)
@@ -315,22 +330,24 @@ def main(args):
     
 
     if args.eval:
+        data_loader_orig = torch.utils.data.DataLoader(
+            dataset_orig, sampler=sampler_src,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=True,
+            shuffle=False,
+            worker_init_fn=utils.seed_worker
+        )
         data_loader_src = torch.utils.data.DataLoader(
             dataset_src, sampler=sampler_src,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=True,
+            shuffle=False,
             worker_init_fn=utils.seed_worker
         )
-        # data_loader_tar = torch.utils.data.DataLoader(
-        #     dataset_tar, sampler=sampler_tar,
-        #     batch_size=args.batch_size,
-        #     num_workers=args.num_workers,
-        #     pin_memory=args.pin_mem,
-        #     drop_last=True,
-        #     worker_init_fn=utils.seed_worker
-        # )
     else:
 
         data_loader_train = torch.utils.data.DataLoader(
@@ -342,17 +359,11 @@ def main(args):
             worker_init_fn=utils.seed_worker
         )
 
-        # data_loader_trainclean = torch.utils.data.DataLoader(
-        #     dataset_trainclean, sampler=sampler_train,
-        #     batch_size=args.batch_size,
-        #     num_workers=args.num_workers,
-        #     pin_memory=args.pin_mem,
-        #     drop_last=True,
-        #     worker_init_fn=utils.seed_worker
-        # )
 
     model.to(device)
     mlp_head.to(device)
+
+
     model_without_ddp = model
     mlp_head_without_ddp = mlp_head
 
@@ -405,9 +416,29 @@ def main(args):
 
 
     if args.eval:
-        test_stats = multi_evaluate(model, mlp_head, data_loader_src, device,  normlize_target=args.normlize_target, log_writer=log_writer,  patch_size=patch_size[0])
-        # anamoly_detection(args, model, data_loader_src, device,  normlize_target=args.normlize_target, log_writer=log_writer,  patch_size=patch_size[0])
-        print(f"Accuracy of the network on the {len(data_loader_src)} test images: {test_stats['loss']:.2f}%  {test_stats['acc1']:.2f}%  {test_stats['acc5']:.2f}%")
+        epsilons = [16/255]
+        attack_iters = [10]
+        lambda_s  = [0, 2, 4, 6, 8, 10]
+        attack_type = args.data_path.split("/")[-2]
+        print(attack_type)
+        for ls in lambda_s:
+        #     for a_iter in attack_iters:
+        #         run_simba_main(model, mlp_head, data_loader_src, device, args)
+                
+        #         simba_adv = np.load('./save/dct_10_simba_advimage.npy')
+        #         simba_label = np.load('./save/dct_10_simba_label.npy')
+        #         simba_mask = np.load('./save/dct_10_simba_mask.npy')
+        #         simba_testset = list(zip(simba_adv, simba_mask, simba_label))
+        #         simba_testloader = Batches(simba_testset, args.batch_size, shuffle=False, device=device, num_workers=2)
+
+            test_stats, correct = multi_evaluate(model, mlp_head, data_loader_src, data_loader_orig, device,  
+                        normlize_target=args.normlize_target, log_writer=log_writer, 
+                        patch_size=patch_size[0], attack_iter=attack_iters[0], epsilon=epsilons[0], lambda_s=ls, output_dir=args.output_dir)
+            print(f"Accuracy of the network on the {len(dataset_src)} test images, loss: {test_stats['loss']:.2f} acc1: {test_stats['acc1']:.2f}% acc5: {test_stats['acc5']:.2f}%")
+            print(f"Accuracy of the attack model: {correct:.4f}")
+        # with open(os.path.join(args.output_dir, args.output_fn), mode="a", encoding="utf-8") as f:
+        #     # f.write(f"eps: {e}, attack_iter: {a_iter}, loss: {test_stats['loss']:.2f}, acc1: {test_stats['acc1']:.2f}%, acc5: {test_stats['acc5']:.2f}%" + "\n")
+        #     f.write(f"attack type: {attack_type} acc: {correct:.4f}")
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
@@ -417,17 +448,6 @@ def main(args):
             data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch)
-
-        # train_stats = train_one_epoch(
-        #     model, data_loader_train,
-        #     optimizer, device, epoch, loss_scaler,
-        #     args.clip_grad, log_writer=log_writer,
-        #     start_steps=epoch * num_training_steps_per_epoch,
-        #     lr_schedule_values=lr_schedule_values,
-        #     wd_schedule_values=wd_schedule_values,
-        #     patch_size=patch_size[0],
-        #     normlize_target=args.normlize_target,
-        # )
 
         train_stats = multi_train_one_epoch(
             model, mlp_head, data_loader_train,
@@ -439,6 +459,7 @@ def main(args):
             patch_size=patch_size[0],
             normlize_target=args.normlize_target,
         )
+
         if args.output_dir:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
                 utils.save_model(

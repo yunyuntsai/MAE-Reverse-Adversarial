@@ -21,6 +21,8 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 from torch._six import inf
+import torch.nn as nn
+import torch.nn.functional as F
 
 import random
 
@@ -445,6 +447,47 @@ def save_model(args, epoch, model, model_without_ddp, optimizer,
             client_state['model_ema'] = get_state_dict(model_ema)
         model.save_checkpoint(save_dir=args.output_dir, tag="checkpoint-%s" % epoch_name, client_state=client_state)
 
+def contrast_save_model(args, epoch, ssl_head, ssl_head_without_ddp, ssl_optimizer,
+                mlp_head, mlp_head_without_ddp, mlp_optimizer, loss_scaler, model_ema=None):
+                   
+    output_dir = Path(args.output_dir)
+    epoch_name = str(epoch)
+    if loss_scaler is not None:
+        ssl_checkpoint_paths = [output_dir / ('ssl-checkpoint-%s.pth' % epoch_name)]
+        mlp_checkpoint_paths = [output_dir / ('mlp-checkpoint-%s.pth' % epoch_name)]
+
+        for checkpoint_path in ssl_checkpoint_paths:
+            to_save = {
+                'model': ssl_head_without_ddp.state_dict(),
+                'optimizer': ssl_optimizer.state_dict(),
+                'epoch': epoch,
+                'scaler': loss_scaler.state_dict(),
+                'args': args,
+            }
+
+            if model_ema is not None:
+                to_save['model_ema'] = get_state_dict(model_ema)
+
+            save_on_master(to_save, checkpoint_path)
+
+        for mlp_checkpoint_path in mlp_checkpoint_paths:
+            to_save = {
+                'model': mlp_head_without_ddp.state_dict(),
+                'optimizer': mlp_optimizer.state_dict(),
+                'epoch': epoch,
+                'scaler': loss_scaler.state_dict(),
+                'args': args,
+            }
+
+            if model_ema is not None:
+                to_save['model_ema'] = get_state_dict(model_ema)
+
+            save_on_master(to_save, mlp_checkpoint_path)
+    else:
+        client_state = {'epoch': epoch}
+        if model_ema is not None:
+            client_state['model_ema'] = get_state_dict(model_ema)
+        model.save_checkpoint(save_dir=args.output_dir, tag="checkpoint-%s" % epoch_name, client_state=client_state)
 
 def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, model_ema=None):
     output_dir = Path(args.output_dir)
@@ -595,12 +638,74 @@ def visualize_tsne(feature, group_ylabel):
     )
     plt.savefig('./output/mae_tsne.png')
 
-def gaussian_noise(x):
+def gaussian_noise(x, eps):
     # c = [.08, .12, 0.18, 0.26, 0.38][severity - 1]
     std_range = [.05, 0.5]  
-    eps_bound = [4/255, 8/255, 16/255]
-    eps = eps_bound[np.random.randint(0,3,1)[0]]
+    # eps_bound = [2/255, 4/255, 8/255, 16/255]
+    # eps = eps_bound[np.random.randint(0,3,1)[0]]
     c = (std_range[1] - std_range[0]) * np.random.uniform(0,1) + std_range[0]
     # print('std: {} eps: {}'.format(c, eps))
     noise = torch.sign(torch.empty((x.shape)).normal_(mean=0, std=c))*eps
     return x + torch.clamp(noise.cuda(), 0, 1)
+
+
+class ContrastiveTransform:
+    """Contrastive learning with given tranformations"""
+
+    def __init__(self):
+      from torchvision.transforms import transforms
+      self.transforms_num = 3
+      self.transforms = torch.nn.Sequential(
+            #transforms.Resize(size=256),
+            transforms.RandomResizedCrop(size=224),
+            # transforms.ColorJitter(0.8, 0.8, 0.8 , 0.2),
+            transforms.RandomGrayscale(p=0.2),
+            #transforms.RandomRotation((-180, 180)),
+            transforms.RandomHorizontalFlip(),
+        )  
+    def __call__(self, x):
+        out = []
+        out += [x]
+        for i in range(self.transforms_num):
+            out += [self.transforms(x)]
+        out = [torch.unsqueeze(item, 0) for item in out] ## add
+        out = torch.vstack(out)
+        x_concat = out[0]
+        for i in range(1, out.shape[0]):
+            x_concat = torch.cat((x_concat, out[i]), axis=0)
+        return x_concat
+
+def contrastive_loss_func(contrastive_head, criterion, bs, n_views):
+
+    features = F.normalize(contrastive_head, dim=1)
+
+    labels = torch.cat([torch.arange(bs) for i in range(n_views)], dim=0)
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    labels = labels.cuda()
+            
+    similarity_matrix = torch.matmul(features, features.T)
+    # print("sim matrix: {}".format(similarity_matrix))
+
+    mask = torch.eye(labels.shape[0], dtype=torch.bool).cuda()
+    labels = labels[~mask].view(labels.shape[0], -1)
+    similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+
+    # select and combine multiple positives
+    positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+    # select only the negatives the negatives
+    negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+
+    positives = torch.mean(positives, dim=1, keepdim=True)
+
+    logits = torch.cat([positives, negatives], dim=1)
+    labels = torch.zeros(logits.shape[0], dtype=torch.long).cuda()
+          
+    temperature = 0.2
+    logits = logits / temperature
+
+    xcontrast_loss = criterion(logits, labels)
+
+    correct = (logits.max(1)[1] == labels).sum().item()
+    return xcontrast_loss, correct
+
+

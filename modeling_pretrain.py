@@ -46,6 +46,25 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
+
+class SSL_contrast(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None):
+        super(SSL_contrast, self).__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.bn = nn.BatchNorm1d(hidden_features) #512
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        # self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.bn(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        return x
+
+
 class PretrainVisionTransformerEncoder(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
@@ -308,7 +327,7 @@ class PretrainVisionTransformer(nn.Module):
 
     def forward(self, x, mask):
         
-        x_vis, _ = self.encoder(x, mask) # [B, N_vis, C_e]
+        x_vis, x_all_head = self.encoder(x, mask) # [B, N_vis, C_e]
         x_vis = self.encoder_to_decoder(x_vis) # [B, N_vis, C_d]
 
         B, N, C = x_vis.shape
@@ -322,7 +341,7 @@ class PretrainVisionTransformer(nn.Module):
         # notice: if N_mask==0, the shape of x is [B, N_mask, 3 * 16 * 16]
         x = self.decoder(x_full, pos_emd_mask.shape[1]) # [B, N_mask, 3 * 16 * 16]
 
-        return x
+        return x, x_all_head
 
 @register_model
 def pretrain_mae_small_patch16_224(pretrained=False, **kwargs):

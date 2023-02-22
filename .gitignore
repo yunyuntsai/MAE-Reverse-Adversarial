@@ -7,3 +7,5 @@ checkpoints/
 **/.ipynb_checkpoints/**
 run.sh
 output/
+save/
+
