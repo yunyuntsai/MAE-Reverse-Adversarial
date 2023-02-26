@@ -169,7 +169,6 @@ def targeted_vals(model, dataset, attack, real_dir, adv_dir, targeted_lr, t_radi
         val_dataset = torchvision.datasets.ImageFolder(root=image_dir, transform=plain_transforms)
         val_dataset_loader = data.DataLoader(val_dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=2)
 
-        iters = 0
         for img, label in (val_dataset_loader):
             # image_dir = os.path.join(real_dir, str(i) + "_img.pt") # TODO: edit
             # assert os.path.exists(image_dir)
@@ -183,14 +182,10 @@ def targeted_vals(model, dataset, attack, real_dir, adv_dir, targeted_lr, t_radi
 
             val = targeted_detection(model, img, label, dataset, targeted_lr, t_radius)
             vals = np.concatenate((vals, [val]))
-            iters += 1
-            if iters > 5:
-                break
 
     else: 
         cout = 0 # TODO: edit if statement logic
 
-        iters = 0
         image_dir = adv_dir
         assert os.path.exists(image_dir)
         atk_dataset = torchvision.datasets.ImageFolder(root=image_dir, transform=plain_transforms)
@@ -208,9 +203,6 @@ def targeted_vals(model, dataset, attack, real_dir, adv_dir, targeted_lr, t_radi
             if real_label == predicted_label: # TODO: edit
                 cout -= 1
                 continue
-            iters += 1
-            if iters > 5:
-                break
             val = targeted_detection(model, img, label, dataset, targeted_lr, t_radius)
             vals = np.concatenate((vals, [val]))
             
