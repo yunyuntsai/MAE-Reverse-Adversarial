@@ -50,14 +50,14 @@ plain_transforms = transforms.Compose([
 
 def targeted_detection(model, img, true_label, dataset, lr, t_radius, cap=200, margin=20, use_margin=False):
     model.eval()
-    # x_var = torch.autograd.Variable(img.clone().cuda(), requires_grad=True
-    x_var = torch.autograd.Variable(img.clone(), requires_grad=True)
+    x_var = torch.autograd.Variable(img.clone().cuda(), requires_grad=True)
+    # x_var = torch.autograd.Variable(img.clone(), requires_grad=True)
     # true_label = model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item()
     # change this function to pass in the true label
 
     optimizer_s = optim.SGD([x_var], lr=lr)
-    # target_l = torch.LongTensor([random_label(true_label, dataset=dataset)]).cuda()
-    target_l = torch.LongTensor([random_label(true_label, dataset=dataset)])
+    target_l = torch.LongTensor([random_label(true_label, dataset=dataset)]).cuda()
+    # target_l = torch.LongTensor([random_label(true_label, dataset=dataset)])
     counter = 0
 
     # while model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item() == true_label: 
@@ -93,6 +93,7 @@ def untargeted_detection(model,
                          use_margin=False):
     model.eval()
     x_var = torch.autograd.Variable(img.clone().cuda(), requires_grad=True)
+    # x_var = torch.autograd.Variable(img.clone(), requires_grad=True)
     true_label = model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item()
     optimizer_s = optim.SGD([x_var], lr=lr)
     counter = 0
@@ -107,6 +108,7 @@ def untargeted_detection(model,
             loss = (output[0][true_label] - output[0][argmaxl1] + margin).clamp(min=0)
         else: 
             loss = -F.cross_entropy(output, torch.LongTensor([true_label]).cuda())
+            # loss = -F.cross_entropy(output, torch.LongTensor([true_label]))
         loss.backward()
 
         x_var.data = torch.clamp(x_var - lr * x_var.grad.data, min=0, max=1)
@@ -184,7 +186,7 @@ def targeted_vals(model, dataset, attack, real_dir, adv_dir, targeted_lr, t_radi
             vals = np.concatenate((vals, [val]))
 
     else: 
-        cout = 0 # TODO: edit if statement logic
+        cout = 0
 
         image_dir = adv_dir
         assert os.path.exists(image_dir)
@@ -209,90 +211,45 @@ def targeted_vals(model, dataset, attack, real_dir, adv_dir, targeted_lr, t_radi
         print('this is the number of successes in targeted detection', cout)
     return vals
 
-# def targeted_vals(model, 
-#                   dataset, 
-#                   attack, 
-#                   lowind, 
-#                   upind,
-#                   real_dir, 
-#                   adv_dir, 
-#                   targeted_lr, 
-#                   t_radius):
-#     vals = np.zeros(0)
-#     if attack == "real":
-#         # for i in range(lowind, upind):
-
-#         # imagenet_path = "/Users/albertwen/Downloads/mae_data/ImageNet-Data/"
-#         image_dir = os.path.join(real_dir, 'val')
-#         assert os.path.exists(image_dir)
-#         val_dataset = torchvision.datasets.ImageFolder(root=image_dir, transform=plain_transforms)
-#         val_dataset_loader = data.DataLoader(val_dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=2)
-#         for img, label in enumerate(val_dataset_loader):
-#             # image_dir = os.path.join(real_dir, str(i) + "_img.pt") # TODO: edit
-#             # assert os.path.exists(image_dir)
-        
-#             model.eval()
-
-#             val = targeted_detection(model, img, dataset, targeted_lr, t_radius)
-#             vals = np.concatenate((vals, [val]))
-#     else: 
-#         cout = upind - lowind # TODO: edit if statement logic
-
-#         image_dir = os.path.join(adv_dir, attack)
-#         assert os.path.exists(image_dir)
-#         atk_dataset = torchvision.datasets.ImageFolder(root=image_dir, transform=plain_transforms)
-#         atk_dataset_loader = data.DataLoader(atk_dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=2)
-
-#         for img, label in enumerate(atk_dataset_loader):
-
-#         # for i in range(lowind, upind):
-#             # image_dir = os.path.join(os.path.join(adv_dir, attack), str(i) + title + '.pt')
-#             # assert os.path.exists(image_dir)
-#             # adv = torch.load(image_dir)
-#             # real_label = torch.load(os.path.join(real_dir, str(i) + '_label.pt'))
-#             model.eval()
-#             predicted_label = model(img).data.max(1, keepdim=True)[1][0]
-#             real_label = label
-#             if real_label == predicted_label: # TODO: edit
-#                 cout -= 1
-#                 continue
-#             val = targeted_detection(model, img, dataset, targeted_lr, t_radius)
-#             vals = np.concatenate((vals, [val]))
-#         print('this is the number of successes in targeted detection', cout)
-#     return vals
-
-def untargeted_vals(model, 
-                    dataset, 
-                    title, 
-                    attack, 
-                    lowind, 
-                    upind, 
-                    real_dir, 
-                    adv_dir, 
-                    untargeted_lr, 
-                    u_radius):
+def untargeted_vals(model, dataset, attack, real_dir, adv_dir, untargeted_lr, u_radius):
     vals = np.zeros(0)
     if attack == "real":
-        for i in range(lowind, upind):
-            image_dir = os.path.join(real_dir, str(i) + '_img.pt') # TODO: edit
-            assert os.path.exists(image_dir)
-            view_data = torch.load(image_dir)
+
+        image_dir = os.path.join(real_dir)
+        assert os.path.exists(image_dir)
+        val_dataset = torchvision.datasets.ImageFolder(root=image_dir, transform=plain_transforms)
+        val_dataset_loader = data.DataLoader(val_dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=2)
+        for img, label in (val_dataset_loader):
+
+        # for i in range(lowind, upind):
+            # image_dir = os.path.join(real_dir, str(i) + '_img.pt')
+            # assert os.path.exists(image_dir)
+            # view_data = torch.load(image_dir)
+
             model.eval()
-            val = untargeted_detection(model, view_data, dataset, untargeted_lr, u_radius)
-            vals = np.concanate((vals, [val]))
+            val = untargeted_detection(model, img, label, dataset, untargeted_lr, u_radius)
+            vals = np.concatenate((vals, [val]))
     else: 
-        cout = upind - lowind
-        for i in range(lowind, upind):
-            image_dir = os.path.join(os.path.join(adv_dir, attack), str(i) + title + '.pt') # TODO: edit
-            assert os.path.exists(image_dir)
-            adv = torch.load(image_dir)
-            real_label = torch.load(os.path.join(real_dir, str(i) + "_label.pt")) # TODO: edit
+        cout = 0
+        image_dir = os.path.join(adv_dir, attack)
+        assert os.path.exists(image_dir)
+        atk_dataset = torchvision.datasets.ImageFolder(root=image_dir, transform=plain_transforms)
+        atk_dataset_loader = data.DataLoader(atk_dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=2)
+        for img, label in (atk_dataset_loader):
+
+        # for i in range(lowind, upind):
+            # image_dir = os.path.join(os.path.join(adv_dir, attack), str(i) + title + '.pt')
+            # assert os.path.exists(image_dir)
+            # adv = torch.load(image_dir)
+            # real_label = torch.load(os.path.join(real_dir, str(i) + "_label.pt")) # TODO: edit
             model.eval()
-            predicted_label = model(transform(adv.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0]
+            # predicted_label = model(transform(adv.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0]
+            predicted_label = model(img).data.max(1, keepdim=True)[1][0]
+            real_label = label
             if real_label == predicted_label:
-                count -= 1
+                cout -= 1
                 continue
-            val = untargeted_detection(model, adv, dataset, untargeted_lr, u_radius)
+            val = untargeted_detection(model, img, dataset, untargeted_lr, u_radius)
             vals = np.concatenate((vals, [val]))
         print('this is the number of successes in untargeted detection', cout)
     return vals
