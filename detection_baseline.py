@@ -50,14 +50,15 @@ plain_transforms = transforms.Compose([
 
 def targeted_detection(model, img, true_label, dataset, lr, t_radius, cap=200, margin=20, use_margin=False):
     model.eval()
-    x_var = torch.autograd.Variable(img.clone().cuda(), requires_grad=True)
-    # x_var = torch.autograd.Variable(img.clone(), requires_grad=True)
+    # x_var = torch.autograd.Variable(img.clone().cuda(), requires_grad=True)
+    x_var = torch.autograd.Variable(img.clone(), requires_grad=True)
+
     # true_label = model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item()
     # change this function to pass in the true label
 
     optimizer_s = optim.SGD([x_var], lr=lr)
-    target_l = torch.LongTensor([random_label(true_label, dataset=dataset)]).cuda()
-    # target_l = torch.LongTensor([random_label(true_label, dataset=dataset)])
+    # target_l = torch.LongTensor([random_label(true_label, dataset=dataset)]).cuda()
+    target_l = torch.LongTensor([random_label(true_label, dataset=dataset)])
     counter = 0
 
     # while model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item() == true_label: 
@@ -85,6 +86,7 @@ def targeted_detection(model, img, true_label, dataset, lr, t_radius, cap=200, m
 
 def untargeted_detection(model, 
                          img, 
+                         true_label, 
                          dataset, 
                          lr, 
                          u_radius, 
@@ -92,14 +94,14 @@ def untargeted_detection(model,
                          margin=20, 
                          use_margin=False):
     model.eval()
-    x_var = torch.autograd.Variable(img.clone().cuda(), requires_grad=True)
-    # x_var = torch.autograd.Variable(img.clone(), requires_grad=True)
-    true_label = model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item()
+    # x_var = torch.autograd.Variable(img.clone().cuda(), requires_grad=True)
+    x_var = torch.autograd.Variable(img.clone(), requires_grad=True)
+    # true_label = model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item()
     optimizer_s = optim.SGD([x_var], lr=lr)
     counter = 0
-    while model(transform(x_var.clone(), dataset=dataset)).data.max(1, keepdim=True)[1][0].item() == true_label:
+    while model(x_var).data.max(1, keepdim=True)[1][0].item() == true_label:
         optimizer_s.zero_grad()
-        output = model(transform(x_var, dataset=dataset))
+        output = model(x_var)
         if use_margin:
             _, top2_1 = output.data.cpu().topk(2)
             argmaxl1 = top2_1[0][0]
@@ -107,8 +109,8 @@ def untargeted_detection(model,
                 argmaxl1 = top2_1[0][1]
             loss = (output[0][true_label] - output[0][argmaxl1] + margin).clamp(min=0)
         else: 
-            loss = -F.cross_entropy(output, torch.LongTensor([true_label]).cuda())
-            # loss = -F.cross_entropy(output, torch.LongTensor([true_label]))
+            # loss = -F.cross_entropy(output, torch.LongTensor([true_label]).cuda())
+            loss = -F.cross_entropy(output, torch.LongTensor([true_label]))
         loss.backward()
 
         x_var.data = torch.clamp(x_var - lr * x_var.grad.data, min=0, max=1)
@@ -249,7 +251,7 @@ def untargeted_vals(model, dataset, attack, real_dir, adv_dir, untargeted_lr, u_
             if real_label == predicted_label:
                 cout -= 1
                 continue
-            val = untargeted_detection(model, img, dataset, untargeted_lr, u_radius)
+            val = untargeted_detection(model, img, label, dataset, untargeted_lr, u_radius)
             vals = np.concatenate((vals, [val]))
         print('this is the number of successes in untargeted detection', cout)
     return vals

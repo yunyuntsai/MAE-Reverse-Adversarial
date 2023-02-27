@@ -10,6 +10,7 @@ def transform(img, dataset="imagenet"):
         std = torch.Tensor([0.229, 0.224, 0.225]).unsqueeze(1).expand_as(img[0, :, :, 0]).unsqueeze(2).expand_as(
             img[0]).unsqueeze(0).expand_as(img).cuda()
     else:
+        print("dataset:", dataset)
         raise "dataset is not support / dataset input error"
     return (img - mean) / std
 
