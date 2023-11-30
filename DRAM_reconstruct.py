@@ -1,26 +1,19 @@
 import torch
-import torch.nn as nn
-from PIL import Image
 import util.misc as misc
-
 import argparse
-import numpy as np
 import os
-
-from pathlib import Path
-
 import torch
 import torch.backends.cudnn as cudnn
 import torchvision
 from torchvision import transforms
 import util.misc as misc
 from util.datasets import build_dataset
-from patch_attack import generate_adversarial_image
 import models_mae
 
+# TODO: need to delete nonsense args
 def get_args_parser():
     parser = argparse.ArgumentParser('DRAM_reconstruction for image classification', add_help=False)
-    parser.add_argument('--batch_size', default=64, type=int,
+    parser.add_argument('--batch_size', default=10, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
 
     # Model parameters
@@ -95,7 +88,7 @@ def get_args_parser():
                         help='Use class token instead of global pool for classification')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
+    parser.add_argument('--data_path', default='', type=str,
                         help='dataset path')
     parser.add_argument('--nb_classes', default=1000, type=int,
                         help='number of the classification types')
@@ -153,21 +146,24 @@ def prepare_model(chkpt_dir, arch='mae_vit_large_patch16'):
 
 @torch.no_grad()
 @torch.cuda.amp.autocast()
-def eval_DRAM(classifier_model, ori_imgs, adv_imgs, rec_imgs, target):
+def eval_DRAM(classifier_model, ori_imgs, adv_imgs, rec_imgs):
+    # here, we set the ground truth of target as resnet50(ori)
     output_ori = classifier_model(ori_imgs)
-    _, pre = torch.max(output_ori.data, 1)
-    correct_ori = (pre == target).sum()
+    _, target = torch.max(output_ori.data, 1)
     
+    # evaluate adversarial images
     output_adv = classifier_model(adv_imgs)
-    _, pre = torch.max(output_adv.data, 1)
-    correct_adv = (pre == target).sum()
+    _, pre_adv = torch.max(output_adv.data, 1)
+    correct_adv = (pre_adv == target).sum()
 
+    # evaluate reconstructed images
     output_rec = classifier_model(rec_imgs)
-    _, pre = torch.max(output_rec.data, 1)
-    correct_rec = (pre == target).sum()
+    _, pre_rec = torch.max(output_rec.data, 1)
+    correct_rec = (pre_rec == target).sum()
 
-    return correct_ori, correct_adv, correct_rec
+    return correct_adv, correct_rec
 
+# TODO: remove it later. it is for testing
 def save_tensor_as_image(tensor, filename):
     # Define the inverse transformation
     inverse_transform = transforms.Compose([
@@ -184,51 +180,79 @@ def save_tensor_as_image(tensor, filename):
 
 # TODO: For testing purpose, remove later
 @torch.no_grad()
-def test_DRAM(classifier_model, mae_model, device, target):
-    # Define the transformation
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),     # Resize the image to 224x224 pixels
-        transforms.ToTensor(),             # Convert the image to a PyTorch tensor
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # Normalize for ResNet50
-    ])
+def test_DRAM(classifier_model, ori_img, adv_img, mae_model, device):
+    assert (adv_img.shape == torch.Size([1, 3, 224, 224]))
+    # to_pil = ToPILImage()
+    # ori_img = to_pil(ori_img)
+    # adv_img = to_pil(adv_img)
+    # # Define the transformation
+    # transform = transforms.Compose([
+    #     transforms.Resize((224, 224)),     # Resize the image to 224x224 pixels
+    #     transforms.ToTensor(),             # Convert the image to a PyTorch tensor
+    #     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # Normalize for ResNet50
+    # ])
 
-    ori_img = Image.open("/home/paperspace/DRAM/zhuoxuan_mae/mae/ILSVRC2012_val_00018075.JPEG")
-    ori_img = transform(ori_img)
-    ori_img = ori_img.unsqueeze(0) 
-    print("ori_img.shape: ", ori_img.shape)
-    save_tensor_as_image(ori_img, 'original_image.jpg')
-    ori_img = ori_img.to(device)
+    # ori_img = Image.open("/home/paperspace/DRAM/zhuoxuan_mae/mae/ILSVRC2012_val_00018075.JPEG")
+    # ori_img = transform(ori_img)
+    # ori_img = ori_img.unsqueeze(0) 
+    # save_tensor_as_image(ori_img, 'original_image.jpg')
+    # ori_img = ori_img.to(device)
     output_ori = classifier_model(ori_img)
     pre = torch.max(output_ori)
     print("ori: ", pre)
     
-    adv_img = Image.open("/home/paperspace/DRAM/zhuoxuan_mae/mae/ILSVRC2012_val_00018075.png")
-    adv_img = transform(adv_img)
-    adv_img = adv_img.unsqueeze(0) 
-    print("adv_img.shape: ", adv_img.shape)
-    save_tensor_as_image(adv_img, 'adv_img.jpg')
-    adv_img = adv_img.to(device)
+    # adv_img = Image.open("/home/paperspace/DRAM/zhuoxuan_mae/mae/ILSVRC2012_val_00018075.png")
+    # adv_img = transform(adv_img)
+    # adv_img = adv_img.unsqueeze(0) 
+    # save_tensor_as_image(adv_img, 'adv_img.jpg')
+    # adv_img = adv_img.to(device)
     output_adv = classifier_model(adv_img)
     pre = torch.max(output_adv)
     print("adv: ", pre)
 
     rec_img = DRAM_reconstruct(mae_model, adv_img, mask_ratio=0.75)
-    save_tensor_as_image(rec_img, 'rec_img.jpg')
+    # save_tensor_as_image(rec_img, 'rec_img.jpg')
     output_rec = classifier_model(rec_img)
     pre = torch.max(output_rec)
     print("rec: ", pre)
 
 @torch.no_grad()
 @torch.cuda.amp.autocast()
-def DRAM_reconstruct(mae_model, adv_imgs, mask_ratio=0.75, iteration=200):
-    # TODO: detect which patches are attacked
-    attacked_patches = [2, 3, 4, 5, 6]
+def DRAM_detection(mae_model, adv_imgs, topK=0.10, iteration=10):
+    max_avg_loss = 0
+    max_top_indices = None
+    
+    for _ in range(iteration):
+        loss_per_patch = mae_model.forward_loss(adv_imgs)
+        # [N, L], mse loss per patch
+
+        # find the top 10% losses and their average
+        N, L = loss_per_patch.shape
+        num_top_patches = int(L * topK)
+        top_losses, top_indices = torch.topk(loss_per_patch.view(N, -1), num_top_patches, dim=1)
+        avg_top_loss = top_losses.mean()
+
+        # compare with the current maximum average loss
+        if avg_top_loss > max_avg_loss:
+            max_avg_loss = avg_top_loss
+            max_top_indices = top_indices
+            # [batch, num_topk_indexes]
+
+    return max_top_indices
+    
+@torch.no_grad()
+@torch.cuda.amp.autocast()
+def DRAM_reconstruct(mae_model, adv_imgs, mask_ratio=0.75, iteration=5):
+    attacked_patch_indexes = DRAM_detection(mae_model, adv_imgs)
+    # [batch, num_topk_indexes]
 
     for _ in range(iteration):
         # recon attacked_patches only. 
         # rec_img = adv_img_benign + rec_adv_img_attacked
-        rec_imgs = mae_model(adv_imgs, attacked_patches, mask_ratio)
-        # [batch, Channel=3, Height, Width]
+        adv_imgs = mae_model(adv_imgs, attacked_patch_indexes, mask_ratio)
+    # [batch, Channel=3, Height, Width]
+    
+    rec_imgs = adv_imgs
 
     return rec_imgs
 
@@ -258,43 +282,48 @@ def engine_DRAM(mae_model, data_loader_adv, data_loader_ori, device):
     # iterate ori dataset along with adv
     data_loader_ori_iter = iter(data_loader_ori)
 
-    for step, (adv_imgs, target) in enumerate(metric_logger.log_every(data_loader_adv, 10, header)):
+    for step, (adv_imgs, target) in enumerate(metric_logger.log_every(data_loader_adv, 20, header)):
+        # get adv info
         adv_imgs = adv_imgs.to(device, non_blocking=True)
         # [batch, Channel=3, Height, Width]
         target = target.to(device, non_blocking=True)
 
-        ori_imgs = next(data_loader_ori_iter)[0].to(device, non_blocking=True)
-
-        ## TODO: reconstruct imgs to eliminate patch
+        # get ori info
+        ori_imgs, ori_target = next(data_loader_ori_iter)
+        ori_imgs = ori_imgs.to(device, non_blocking=True)
+        # [batch, Channel=3, Height, Width]
+        ori_target = ori_target.to(device, non_blocking=True)
+        
+        # check we load the data correctly
+        assert torch.all(target == ori_target), "Target and ori_target are not equal"
+        
+        # recon
         rec_imgs = DRAM_reconstruct(mae_model, adv_imgs, mask_ratio=0.75)
-
-        ## TODO: we test it on golden fish
-        test_DRAM(classifier_model, mae_model, device, target)
-        exit(0)
+        # [batch, Channel=3, Height, Width]
 
         # eval accuracy ori vs adv vs recon
-        correct_ori, correct_adv, correct_rec = eval_DRAM(classifier_model, ori_imgs, 
-                                                           adv_imgs, rec_imgs, target)
-        batch_size = adv_imgs.shape[0]
-        print("batch_size: ", batch_size)
-        print("correct_ori.item(): ", correct_ori.item())
-        print("correct_adv.item(): ", correct_adv.item())
-        print("correct_rec.item(): ", correct_rec.item())
+        correct_adv, correct_rec = eval_DRAM(classifier_model, ori_imgs, adv_imgs, rec_imgs)
+
+        batch_size = args.batch_size
+        # print("batch_size: ", batch_size)
+        # print("correct_ori.item(): ", batch_size)
+        # print("correct_adv.item(): ", correct_adv.item())
+        # print("correct_rec.item(): ", correct_rec.item())
         
-        # we test for 5 steps
-        if step == 5:
+        # we test for 100 steps
+        if step == 10:
             break
 
-        print('correct before attack --> ', correct_ori.item()/batch_size) 
-        print('correct after attack --> ', correct_adv.item()/batch_size)
-        print('correct after reconstruction --> ', correct_rec.item()/batch_size)
+        # print('correct before attack --> ', 1) 
+        # print('correct after attack --> ', correct_adv.item()/batch_size)
+        # print('correct after reconstruction --> ', correct_rec.item()/batch_size)
 
         test_size += batch_size
-        total_correct_ori += correct_ori
+        total_correct_ori += batch_size
         total_correct_adv += correct_adv
         total_correct_rec += correct_rec
     
-    print('total correct before attack --> ', total_correct_ori.item()/test_size) 
+    print('total correct before attack --> ', total_correct_ori/test_size) 
     print('total correct after attack --> ', total_correct_adv.item()/test_size)
     print('total correct after reconstruction --> ', total_correct_rec.item()/test_size)
     return
@@ -308,19 +337,13 @@ def main(args):
 
     device = torch.device(args.device)
 
-    # fix the seed for reproducibility
-    seed = args.seed + misc.get_rank()
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-
     cudnn.benchmark = True
 
     # load data
-    dataset_adv = build_dataset(is_train=False, args=args)
+    dataset_adv = build_dataset(is_train=False, args=args, data_path='../imagenet_adv_2/')
     sampler_adv = torch.utils.data.SequentialSampler(dataset_adv)
 
-    # if args.eval:
-    dataset_ori = build_dataset(is_train=False, args=args)
+    dataset_ori = build_dataset(is_train=False, args=args, data_path='../imagenet_ori_2/')
     sampler_ori = torch.utils.data.SequentialSampler(dataset_ori)
 
     data_loader_adv = torch.utils.data.DataLoader(
@@ -340,7 +363,6 @@ def main(args):
     )
 
     # create mae_model
-    # TODO: visualize for debugging purpose
     chkpt_dir = "mae_visualize_vit_large.pth"
     mae_model = prepare_model(chkpt_dir, 'mae_vit_large_patch16')
     mae_model.to(device)

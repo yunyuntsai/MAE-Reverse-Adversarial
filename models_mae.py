@@ -147,7 +147,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x_masked, mask, ids_restore
 
-    def forward_encoder(self, x, mask_ratio):
+    def forward_encoder(self, x, mask_ratio=0.75):
         # embed patches
         x = self.patch_embed(x)
 
@@ -195,36 +195,63 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
-    def forward(self, imgs, specific_patches, mask_ratio=0.75):
-        # encoder
-        latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio)
+    def forward_loss(self, imgs):
+        """
+        imgs: [N, 3, H, W]
+        pred: [N, L, p*p*3]
+        mask: [N, L], 0 is keep, 1 is remove
+        """
+        latent, _, ids_restore = self.forward_encoder(imgs)
 
-        # decoder
         pred = self.forward_decoder(latent, ids_restore)  
+        # [N, L, p*p*3]
+
+        target = self.patchify(imgs)
+        if self.norm_pix_loss:
+            mean = target.mean(dim=-1, keepdim=True)
+            var = target.var(dim=-1, keepdim=True)
+            target = (target - mean) / (var + 1.e-6)**.5
+
+        loss_per_patch = (pred - target) ** 2
+        loss_per_patch = loss_per_patch.mean(dim=-1)  
+        # [N, L], mse loss per patch
+
+        return loss_per_patch
+
+    def forward(self, imgs, specific_patches, mask_ratio=0.75):
+        latent, _, ids_restore = self.forward_encoder(imgs, mask_ratio)
+
+        pred = self.forward_decoder(latent, ids_restore)
         # [N, L, p*p*3]
 
         # prepare for selective patch replacement
         N, _, _ = pred.shape
         p = self.patch_embed.patch_size[0]
-        
+
         # original image dimensions divided by patch size
         H, W = imgs.shape[2] // p, imgs.shape[3] // p
-    
+
         # Convert imgs and pred to patch representation
-        imgs_patches = self.patchify(imgs)  
-        # [N, L, patch_size**2 *3]
+        imgs_patches = self.patchify(imgs)  # [N, L, patch_size**2 *3]
         pred_patches = pred.view(N, H, W, p, p, 3)
 
+        # Check if specific_patches is a tensor and has the correct dimensions
+        if not torch.is_tensor(specific_patches) or specific_patches.dim() != 2:
+            raise ValueError("specific_patches should be a tensor of shape (batch, something)")
+
         # selectively replace specific patches
-        for patch_idx in specific_patches:
-            # get 2D patch index
-            h_idx, w_idx = divmod(patch_idx, W)
-            imgs_patches[:, patch_idx, :] = pred_patches[:, h_idx, w_idx, :, :, :].reshape(N, -1)
+        for i in range(N):
+            for patch_idx in specific_patches[i]:
+                patch_idx = patch_idx.item()
+                # get 2D patch index
+                h_idx, w_idx = divmod(patch_idx, W)
+                imgs_patches[i, patch_idx, :] = pred_patches[i, h_idx, w_idx, :, :, :].reshape(-1)
 
         # reconstruct the final image with selective replacement
         final_imgs = self.unpatchify(imgs_patches)
 
         return final_imgs
+
 
 
 
